@@ -63,6 +63,89 @@ Every layer below is deliberately named to match how it would be discussed in a 
 | **LLM Gateway** | Model routing, prompt versioning, response caching |
 | **Eval Pipeline** | Offline regression suite + adversarial fixtures (see [Data & Eval](#data--eval)) gating every deploy |
 
+### Ingestion Pipeline Flow
+
+```
+python -m app.ingestion.processor <data_dir> [source_type] [--wipe]
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Qdrant Collection    │
+              │  ensure (--wipe?)     │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Scan Directory       │
+              │  for files            │
+              └───────────┬───────────┘
+                          │
+                    for each file
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Check Extension      │
+              │  .pdf .txt .md .html  │
+              │  .docx .pptx          │──── unsupported ──── SKIP
+              └───────────┬───────────┘
+                          │ supported
+                          ▼
+              ┌───────────────────────┐
+              │  Generate Document ID │
+              │  (SHA-256 of content) │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Parse Document       │
+              │  ┌─────┬─────┬─────┐ │
+              │  │ PDF │ TXT │ .md │ │──── empty text ──── SKIP
+              │  │HTML │     │DOCX │ │
+              │  └─────┴─────┴─────┘ │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Chunk Text           │
+              │  ~1000 chars, 200     │──── no chunks ───── SKIP
+              │  overlap, sentence    │
+              │  boundary aware       │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Save Processed JSON  │
+              │  locally              │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Embed Chunks         │
+              │  Gemini API           │
+              │  (fallback: mpnet)    │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Create Qdrant Points │
+              │  deterministic UUID   │
+              │  = doc_id:idx:chunk   │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Batch Upsert to      │
+              │  Qdrant (batches≤100) │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Summary              │
+              │  success/failed/      │
+              │  skipped              │
+              └───────────────────────┘
+```
+
 ---
 
 ## Data & Eval

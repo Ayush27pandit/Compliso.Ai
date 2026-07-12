@@ -1,2 +1,20 @@
 data/
 .env
+processed_data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Logfire
+.logfire/

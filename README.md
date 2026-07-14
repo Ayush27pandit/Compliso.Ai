@@ -16,6 +16,30 @@ Compliso.ai is built to solve exactly that: **grounded, source-cited, conflict-a
 
 ---
 
+## Quick Start
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Configure environment
+cp .env.example .env   # fill in API keys (Groq, Qdrant, Gemini)
+logfire auth            # set up tracing
+
+# 3. Ingest documents
+python -m app.ingestion.processor data/true_data true
+
+# 4. Start the backend
+python -m app.main
+
+# 5. Start the frontend (new terminal)
+streamlit run ui/app.py
+```
+
+Open `http://localhost:8501` — ask a GST or MSME compliance question.
+
+---
+
 ## What it does
 
 - Answers questions on MSME classification, Udyam registration, GST registration thresholds, GST rate slabs (post GST 2.0 reform), GST return filing & due dates, the composition scheme, and MSME delayed-payment protection (Section 15 MSMED Act / Section 43B(h) Income Tax Act).
@@ -28,7 +52,7 @@ Compliso.ai is built to solve exactly that: **grounded, source-cited, conflict-a
 
 ## Architecture
 
-Compliso.ai follows a production RAG pattern, not a linear notebook pipeline:
+Compliso.ai follows a production RAG pattern, not a linear notebook pipeline. See [docs/architecture.md](docs/architecture.md) for the full system design including agent graph, embedding strategy, Qdrant schema, and memory management.
 
 ```
 User Query

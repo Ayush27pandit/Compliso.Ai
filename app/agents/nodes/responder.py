@@ -34,10 +34,26 @@ def generate_node(state: AgentState):
         LATEST MESSAGE:
         "{user_msg}"
         """
+
+    elif query == "OUT_OF_SCOPE":
+        logfire.info("Question is out of compliance scope.")
+        return {
+            "final_answer": (
+                "This question is outside my compliance expertise. "
+                "I can help with **GST, MSME classification, Udyam registration, "
+                "GST returns, composition scheme, and MSME payment protection**. "
+                "Please ask a compliance-related question."
+            ),
+            "status": "Out of scope.",
+            "plan": state["plan"] + ["Out of scope — no retrieval"],
+            "messages": [{"role": "assistant", "content": "This question is outside my compliance expertise."}],
+        }
+
     else:
         logfire.info("Generating grounded compliance RAG response")
         max_context_chars = 25000
         full_context = ""
+        num_docs_used = 0
 
         for doc in state["documents"]:
             if len(full_context) + len(doc) < max_context_chars:

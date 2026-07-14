@@ -30,9 +30,13 @@ def planner_node(state: AgentState):
     "{user_message}"
 
     Task:
-    1. If the latest message is a greeting (hi, hello) or a question that can be answered using ONLY the conversation history above (e.g., "what turnover did I mention earlier"), respond with 'CONVERSATIONAL'.
-    2. If it is a compliance question about GST, MSME classification, Udyam registration, GST return filing, the composition scheme, or MSME payment-delay protection that requires looking up current regulatory documentation, output a refined search query.
-    3. If it is unrelated to Indian MSME/GST/compliance topics (e.g., general coding help, unrelated business advice, or any other domain), respond with 'OUT_OF_SCOPE'.
+    Classify the user's message into exactly ONE of these three categories:
+
+    1. 'CONVERSATIONAL' — The message is a greeting, small talk, a general knowledge question (e.g., "what is finance", "what is GST", "explain inflation"), a follow-up to the conversation, or anything you can confidently answer WITHOUT looking up specific regulatory documents. When in doubt, prefer this category.
+
+    2. A search query — The message is a specific compliance question about GST rates, MSME classification thresholds, Udyam registration process, GST return filing deadlines, the composition scheme limits, or MSME payment-delay protection (Section 15 MSMED Act / Section 43B(h)) that requires looking up current regulatory documentation. Output the refined search query.
+
+    3. 'OUT_OF_SCOPE' — ONLY for messages completely unrelated to business, finance, or compliance (e.g., "write me a poem", "what's the capital of France", "help me debug Python code", "tell me a joke"). Even borderline finance/business questions should be CONVERSATIONAL, not OUT_OF_SCOPE.
 
     Output ONLY 'CONVERSATIONAL', 'OUT_OF_SCOPE', or the search query.
     """

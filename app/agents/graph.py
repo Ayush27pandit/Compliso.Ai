@@ -22,6 +22,8 @@ def route_planner(state: AgentState):
     """
     if state["current_query"] == "CONVERSATIONAL":
         return "responder"
+    if state["current_query"] == "OUT_OF_SCOPE":
+        return "responder"
     return "retriever"
 
 workflow.set_entry_point("planner")

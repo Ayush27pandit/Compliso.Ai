@@ -1,8 +1,10 @@
 import os
 import logfire
 import uvicorn
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 load_dotenv()
@@ -48,6 +50,12 @@ def get_agent():
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "compliso-backend"}
+
+
+@app.get("/", response_class=FileResponse)
+def serve_landing():
+    landing_page = Path(__file__).parent.parent / "ui" / "landing.html"
+    return FileResponse(landing_page, media_type="text/html")
 
 
 @app.post("/query", response_model=QueryResponse)

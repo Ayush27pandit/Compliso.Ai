@@ -1,6 +1,6 @@
 from bs4 import BeautifulSoup
 import logfire
-from sympy import re
+import re
 
 ### remember to analyse the edges cases in the html files like empty files, files with only scripts or styles, and files with special characters. to understand how best practises are 
 

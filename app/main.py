@@ -34,13 +34,19 @@ class QueryResponse(BaseModel):
 # ── Lazy-load the compiled agent ─────────────────────────────────────────────
 
 _agent = None
+_guardrails_enabled = os.getenv("ENABLE_GUARDRAILS", "false").lower() == "true"
 
 
 def get_agent():
     global _agent
     if _agent is None:
         from app.agents.graph import rag_agent
-        _agent = rag_agent
+        if _guardrails_enabled:
+            from guardrails.integration import wrap_graph_with_guardrails
+            _agent = wrap_graph_with_guardrails(rag_agent)
+            logfire.info("Guardrails enabled for agent")
+        else:
+            _agent = rag_agent
     return _agent
 
 

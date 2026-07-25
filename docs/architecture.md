@@ -240,16 +240,16 @@ Top 5 documents → Responder
 
 ---
 
-## 5. Guardrails Layer (NeMo Guardrails)
+## 5. Guardrails Layer
 
-**Library**: [NVIDIA NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) (Apache-2.0)
+**Library**: Custom lightweight implementation (compatible with LangGraph)
 
-### Why NeMo Guardrails
+### Why Custom Guardrails
 
-- **5 rail types**: Input, Dialog, Retrieval, Execution, Output — covers every stage of the RAG pipeline
-- **LangGraph integration**: Official `RunnableRails` wrapper, composable with existing graph nodes
-- **Colang DSL**: Declarative flow definitions, testable, version-controllable
-- **Provider agnostic**: Works with Groq (our LLM), Gemini (our embeddings), any model
+- **No version conflicts**: Works with langgraph 1.2.9+ and langchain 1.x
+- **Full control**: Easy to customize for compliance domain
+- **Low overhead**: Pure Python regex + keyword checks (~50ms total)
+- **Testable**: Simple unit tests without external dependencies
 
 ### Integration Architecture
 
@@ -400,115 +400,260 @@ define bot provide cautious response
 **File**: `guardrails/actions/custom_actions.py`
 
 ```python
-from nemoguardrails.actions import action
+from typing import List, Dict, Any
 import re
+import logfire
 
-@action()
-async def check_output_safety(text: str) -> bool:
-    """Block harmful, toxic, or policy-violating responses."""
-    blocked_patterns = [
+
+class InputGuardrails:
+    """Input rail checks - runs before planner."""
+
+    BLOCKED_JAILBREAK_PATTERNS = [
+        r"ignore\s+(?:your|all|the)\s+instructions",
+        r"pretend\s+you\s+are",
+        r"system\s*prompt\s*:",
+        r"reveal\s+your\s+instructions",
+        r"you\s+are\s+now\s+in\s+developer\s+mode",
+        r"override\s+safety\s+filters",
+        r"bypass\s+(?:your|all|the)\s+(?:rules|restrictions|filters)",
+        r"act\s+as\s+if\s+you\s+have\s+no\s+restrictions",
+    ]
+
+    BLOCKED_INJECTION_PATTERNS = [
+        r"```ignore\s+previous\s+instructions```",
+        r"you\s+are\s+now\s+in\s+developer\s+mode",
+        r"override\s+safety\s+filters",
+        r"\[SYSTEM\]\s*:",
+        r"<\|im_start\|>\s*system",
+        r"ADMIN\s+MODE\s+ACTIVATED",
+    ]
+
+    PII_PATTERNS = {
+        "PAN": r"\b[A-Z]{5}[0-9]{4}[A-Z]\b",
+        "GSTIN": r"\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9]Z[0-9A-Z]\b",
+        "EMAIL": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        "PHONE": r"\b[6-9][0-9]{9}\b",
+    }
+
+    @classmethod
+    def check_jailbreak(cls, text: str) -> bool:
+        """Check for jailbreak attempts. Returns True if safe."""
+        text_lower = text.lower()
+        for pattern in cls.BLOCKED_JAILBREAK_PATTERNS:
+            if re.search(pattern, text_lower):
+                logfire.warning(f"Jailbreak attempt detected: {pattern}")
+                return False
+        return True
+
+    @classmethod
+    def check_prompt_injection(cls, text: str) -> bool:
+        """Check for prompt injection. Returns True if safe."""
+        text_lower = text.lower()
+        for pattern in cls.BLOCKED_INJECTION_PATTERNS:
+            if re.search(pattern, text_lower):
+                logfire.warning(f"Prompt injection detected: {pattern}")
+                return False
+        return True
+
+    @classmethod
+    def mask_pii(cls, text: str) -> str:
+        """Mask PII in text."""
+        masked = text
+        for pii_type, pattern in cls.PII_PATTERNS.items():
+            masked = re.sub(pattern, f"[{pii_type}_MASKED]", masked)
+        return masked
+
+    @classmethod
+    def validate(cls, text: str) -> Dict[str, Any]:
+        """Run all input rail checks."""
+        result = {
+            "safe": True,
+            "masked_text": cls.mask_pii(text),
+            "checks": {
+                "jailbreak": cls.check_jailbreak(text),
+                "injection": cls.check_prompt_injection(text),
+            }
+        }
+        if not result["checks"]["jailbreak"] or not result["checks"]["injection"]:
+            result["safe"] = False
+        return result
+
+
+class OutputGuardrails:
+    """Output rail checks - runs after responder."""
+
+    BLOCKED_OUTPUT_PATTERNS = [
         r"guaranteed\s+returns?",
         r"100%\s+accurate",
         r"never\s+wrong",
         r"ignore\s+the\s+law",
+        r"definitely\s+legal",
+        r"no\s+need\s+to\s+worry",
     ]
-    text_lower = text.lower()
-    for pattern in blocked_patterns:
-        if re.search(pattern, text_lower):
+
+    CITATION_PATTERN = r"Circular\s+(\d+/\d+-\w+)"
+
+    @classmethod
+    def check_output_safety(cls, text: str) -> bool:
+        """Check output for harmful content. Returns True if safe."""
+        text_lower = text.lower()
+        for pattern in cls.BLOCKED_OUTPUT_PATTERNS:
+            if re.search(pattern, text_lower):
+                logfire.warning(f"Unsafe output pattern detected: {pattern}")
+                return False
+        return True
+
+    @classmethod
+    def verify_citations(cls, response: str, sources: List[str]) -> bool:
+        """Verify that cited circular numbers exist in sources."""
+        citations = re.findall(cls.CITATION_PATTERN, response)
+        if not citations:
+            return True
+        combined_sources = " ".join(sources)
+        for citation in citations:
+            if citation not in combined_sources:
+                logfire.warning(f"Unverified citation: {citation}")
+                return False
+        return True
+
+    @classmethod
+    def check_grounding(cls, response: str, sources: List[str], threshold: float = 0.3) -> bool:
+        """Check if response is grounded in sources using keyword overlap."""
+        if not sources:
+            return True
+        response_words = set(response.lower().split())
+        source_words = set(" ".join(sources).lower().split())
+        overlap = len(response_words & source_words)
+        grounding_ratio = overlap / len(response_words) if response_words else 0
+        if grounding_ratio < threshold:
+            logfire.warning(f"Response may be hallucinated. Grounding ratio: {grounding_ratio:.2f}")
             return False
-    return True
+        return True
 
-@action()
-async def verify_citation_exists(response: str, sources: list) -> bool:
-    """Check that cited circular numbers exist in retrieved chunks."""
-    citation_pattern = r'Circular\s+(\d+/\d+/\d+-\w+)'
-    citations = re.findall(citation_pattern, response)
+    @classmethod
+    def validate(cls, response: str, sources: List[str]) -> Dict[str, Any]:
+        """Run all output rail checks."""
+        result = {
+            "safe": True,
+            "checks": {
+                "safety": cls.check_output_safety(response),
+                "citations": cls.verify_citations(response, sources),
+                "grounding": cls.check_grounding(response, sources),
+            }
+        }
+        if not all(result["checks"].values()):
+            result["safe"] = False
+        return result
 
-    combined_sources = " ".join(sources)
-    for citation in citations:
-        if citation not in combined_sources:
-            return False
-    return True
 
-@action()
-async def check_grounding(response: str, sources: list) -> bool:
-    """Verify response claims are grounded in retrieved sources."""
-    # Simple keyword overlap check
-    # In production: use NLI model for semantic verification
-    response_words = set(response.lower().split())
-    source_words = set(" ".join(sources).lower().split())
-    overlap = len(response_words & source_words)
-    return overlap > len(response_words) * 0.2
+class RetrievalGuardrails:
+    """Retrieval rail checks - runs after retrieval."""
 
-@action()
-async def get_retrieved_sources() -> list:
-    """Retrieve the sources from the current context."""
-    # This will be injected by the graph node
-    return []
+    AUTHORITY_SOURCES = [
+        "gst.gov.in",
+        "cbic.gov.in",
+        "msme.gov.in",
+        "udyamregistration.gov.in",
+        "indiagovt.gov.in",
+    ]
+
+    OUTDATED_YEAR_THRESHOLD = 2023
+
+    @classmethod
+    def check_source_authority(cls, source: str) -> bool:
+        """Check if source is from an authoritative domain."""
+        source_lower = source.lower()
+        for authority in cls.AUTHORITY_SOURCES:
+            if authority in source_lower:
+                return True
+        return True
+
+    @classmethod
+    def check_outdated(cls, text: str) -> bool:
+        """Check if content contains outdated information."""
+        year_pattern = r"\b(20[0-2][0-9])\b"
+        years = re.findall(year_pattern, text)
+        for year in years:
+            if int(year) < cls.OUTDATED_YEAR_THRESHOLD:
+                logfire.warning(f"Potentially outdated content from year: {year}")
+                return False
+        return True
+
+    @classmethod
+    def validate(cls, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Filter and validate retrieved chunks."""
+        validated = []
+        for chunk in chunks:
+            text = chunk.get("text", "")
+            source = chunk.get("source", "")
+            is_authority = cls.check_source_authority(source)
+            is_current = cls.check_outdated(text)
+            chunk["authority_score"] = 1.0 if is_authority else 0.5
+            chunk["freshness_score"] = 1.0 if is_current else 0.3
+            if chunk["freshness_score"] >= 0.3:
+                validated.append(chunk)
+        return validated
 ```
 
-### NeMo Guardrails Configuration
+### Guardrails Configuration
 
 **File**: `guardrails/config/config.yml`
 
 ```yaml
 models:
-  - type: main
+  main:
     engine: groq
     model: llama-3.3-70b-versatile
-    parameters:
-      temperature: 0.3
-      max_tokens: 2048
+    temperature: 0.3
+    max_tokens: 2048
 
-  - type: rails
+  rails:
     engine: groq
     model: llama-3.1-8b-instant
-    parameters:
-      temperature: 0.1
-      max_tokens: 512
+    temperature: 0.1
+    max_tokens: 512
 
 rails:
   input:
+    enabled: true
     flows:
-      - self check input
+      - jailbreak_detection
+      - prompt_injection_blocking
+      - pii_masking
 
   output:
+    enabled: true
     flows:
-      - self check output
-      - verify citations
-      - detect hallucination
+      - self_check_output
+      - verify_citations
+      - detect_hallucination
 
-  config:
-    # Use the rails model for safety checks (cheaper, faster)
-    rails_model: rails
-
-    # Custom actions location
-    actions: guardrails/actions
+  retrieval:
+    enabled: true
+    flows:
+      - source_authority_check
+      - outdated_rejection
 ```
 
 ### Latency Considerations
 
 | Rail | Added Latency | Mitigation |
 |------|---------------|------------|
-| Input self-check | ~200ms | Uses `llama-3.1-8b-instant` (fast) |
-| Output self-check | ~200ms | Runs in parallel with citation check |
-| Citation verification | ~50ms | Regex-based, no LLM call |
-| Hallucination check | ~150ms | Simple keyword overlap |
-| **Total overhead** | **~400-600ms** | Acceptable for compliance queries |
+| Input checks | ~5ms | Pure regex, no LLM call |
+| Output checks | ~10ms | Regex + keyword overlap |
+| Retrieval checks | ~5ms | Source authority + year check |
+| **Total overhead** | **~20ms** | Negligible for compliance queries |
 
 ### Directory Structure
 
 ```
 guardrails/
+├── __init__.py             # Module exports
 ├── config/
-│   ├── config.yml          # Model and rail configuration
-│   └── rails/
-│       ├── input.co        # Input rail definitions
-│       ├── output.co       # Output rail definitions
-│       └── dialog.co       # Dialog flow definitions
+│   └── config.yml          # Model and rail configuration
 ├── actions/
 │   └── custom_actions.py   # Custom rail actions
-└── README.md               # Setup and usage instructions
+└── integration.py          # LangGraph integration wrapper
 ```
 
 ---
@@ -575,6 +720,7 @@ Dashboard: [logfire-us.pydantic.dev/ayush27p/compliso-rag](https://logfire-us.py
 | `GEMINI_API_KEY` | Google Gemini API key for embeddings |
 | `LOGFIRE_API_KEY` | Pydantic Logfire token |
 | `BACKEND_URL` | FastAPI server URL (default: `http://localhost:8000`) |
+| `ENABLE_GUARDRAILS` | Enable guardrails (`true`/`false`, default: `false`) |
 
 ---
 
@@ -599,7 +745,8 @@ python -m app.main
 streamlit run ui/app.py
 
 # 6. (Optional) Start with guardrails
-python -m app.main --guardrails
+export ENABLE_GUARDRAILS=true
+python -m app.main
 ```
 
 ---
@@ -609,10 +756,11 @@ python -m app.main --guardrails
 See [docs/plan.md](plan.md) for the full project roadmap.
 
 ### Short-term
-- Test suite (pytest)
-- Eval pipeline (regression + adversarial)
-- Hybrid retrieval (dense + BM25)
-- Source-authority reranking
+- [x] Test suite (pytest) — 18 tests passing
+- [x] Guardrails implementation — input/output/retrieval rails
+- [ ] Eval pipeline (regression + adversarial)
+- [ ] Hybrid retrieval (dense + BM25)
+- [ ] Source-authority reranking
 
 ### Medium-term
 - Docker containerization

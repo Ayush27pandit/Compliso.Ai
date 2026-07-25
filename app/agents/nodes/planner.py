@@ -52,6 +52,13 @@ def planner_node(state: AgentState):
             "plan": ["Intent: Conversational/Memory", "Retrieval: Skipped"]
         }
 
+    if decision == "OUT_OF_SCOPE":
+        return {
+            "current_query": "OUT_OF_SCOPE",
+            "status": "Out of scope request detected.",
+            "plan": ["Intent: Out of scope", "Retrieval: Skipped"]
+        }
+
     return {
         "current_query": decision,
         "status": f"Technical research needed. Searching for: {decision}",

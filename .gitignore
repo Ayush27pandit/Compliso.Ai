@@ -1,13 +1,24 @@
-data/
+# Data
+api/data/
+api/processed_data/
+
+# Environment
 .env
-processed_data/
+.env.local
+web/.env.local
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 venv/
+api/venv/
 .venv/
+
+# Node
+web/node_modules/
+web/dist/
+.pnpm-store/
 
 # IDE
 .vscode/
@@ -18,3 +29,8 @@ venv/
 
 # Logfire
 .logfire/
+
+# Test
+.pytest_cache/
+htmlcov/
+.coverage

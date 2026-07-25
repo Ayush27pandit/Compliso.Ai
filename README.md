@@ -10,32 +10,44 @@ Compliso.ai is a production-shaped Retrieval-Augmented Generation (RAG) system t
 
 ## Quick Start
 
+### Backend
+
 ```bash
-# 1. Install dependencies
+# 1. Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. Install dependencies
+cd api
 pip install -r requirements.txt
 
-# 2. Configure environment
+# 3. Configure environment
 cp .env.example .env   # fill in API keys (Groq, Qdrant, Gemini)
 logfire auth            # set up tracing
 
-# 3. Ingest documents
+# 4. Ingest documents
 python -m app.ingestion.processor data/true_data true
 
-# 4. Start the backend
-python -m app.main
-
-# 5. Start the frontend (new terminal)
-streamlit run ui/app.py
+# 5. Start the backend
+uvicorn app.main:app --port 8000 --reload
 ```
 
-Open `http://localhost:8501` — ask a GST or MSME compliance question.
+### Frontend
+
+```bash
+# In a new terminal
+cd web
+pnpm install
+pnpm dev
+```
+
+Open `http://localhost:3000` — landing page. Navigate to `#chat` for the chat interface.
 
 ### With Guardrails
 
 ```bash
-# Enable input/output guardrails
 export ENABLE_GUARDRAILS=true
-python -m app.main
+uvicorn app.main:app --port 8000 --reload
 ```
 
 ---
@@ -54,19 +66,20 @@ python -m app.main
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                  Streamlit UI (ui/app.py)                    │
-│             Compliso-branded chat interface                  │
+│             React Frontend (web/ — Vite + TypeScript)         │
+│          Landing page (#/) + Chat interface (#chat)           │
+│          Real-time SSE streaming, Zustand state               │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ POST /query
+                           │ POST /query / POST /query/stream
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                 FastAPI Backend (app/main.py)                │
-│           Request validation, session routing                │
+│                 FastAPI Backend (api/app/main.py)             │
+│           CORS, request validation, SSE streaming             │
 └──────────────────────────┬──────────────────────────────────┘
                            │ LangGraph invoke
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│            LangGraph Agent (app/agents/graph.py)             │
+│          LangGraph Agent (api/app/agents/graph.py)            │
 │                                                              │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐               │
 │  │ Planner  │──▶│Retriever │──▶│Responder │──▶ END        │
@@ -125,7 +138,7 @@ Custom lightweight guardrails that run before/after the agent:
 
 ```bash
 export ENABLE_GUARDRAILS=true
-python -m app.main
+uvicorn app.main:app --port 8000 --reload
 ```
 
 ---
@@ -133,6 +146,8 @@ python -m app.main
 ## Testing
 
 ```bash
+cd api
+
 # Run all tests
 pytest
 
@@ -175,38 +190,52 @@ Skills are in `docs/skills/` — each follows the [Agent Skills standard](https:
 
 ```
 compliso/
-├── app/
-│   ├── agents/
-│   │   ├── graph.py          # LangGraph graph definition
-│   │   ├── state.py          # AgentState TypedDict
-│   │   └── nodes/
-│   │       ├── planner.py    # Intent classification
-│   │       ├── retriever.py  # Qdrant search + reranking
-│   │       └── responder.py  # LLM response generation
-│   ├── ingestion/
-│   │   ├── processor.py      # Ingestion pipeline
-│   │   ├── loaders/          # PDF, HTML, MD, TXT parsers
-│   │   └── chunking/         # Text splitter
-│   ├── services/
-│   │   └── retrieval/        # Embeddings, Qdrant, reranking
-│   ├── config.py             # Settings class
-│   └── main.py               # FastAPI backend
-├── guardrails/
-│   ├── config/config.yml     # Rail configuration
-│   ├── actions/              # Custom rail actions
-│   └── integration.py        # LangGraph wrapper
-├── tests/
-│   ├── conftest.py           # Shared fixtures
-│   ├── test_planner.py       # Planner tests
-│   └── test_guardrails.py    # Guardrails tests
+├── api/                            # Python backend
+│   ├── app/
+│   │   ├── agents/
+│   │   │   ├── graph.py            # LangGraph graph definition
+│   │   │   ├── state.py            # AgentState TypedDict
+│   │   │   └── nodes/
+│   │   │       ├── planner.py      # Intent classification
+│   │   │       ├── retriever.py    # Qdrant search + reranking
+│   │   │       └── responder.py    # LLM response generation
+│   │   ├── guardrails/
+│   │   │   ├── actions/            # Input/output/retrieval rails
+│   │   │   ├── config/config.yml   # Rail configuration
+│   │   │   └── integration.py      # LangGraph wrapper
+│   │   ├── ingestion/
+│   │   │   ├── processor.py        # Ingestion pipeline
+│   │   │   ├── loaders/            # PDF, HTML, MD, TXT parsers
+│   │   │   └── chunking/           # Text splitter
+│   │   ├── services/
+│   │   │   └── retrieval/          # Embeddings, Qdrant, reranking
+│   │   ├── config.py               # Settings class
+│   │   └── main.py                 # FastAPI backend + SSE streaming
+│   ├── data/                       # Source documents
+│   ├── tests/
+│   │   ├── conftest.py             # Shared fixtures
+│   │   ├── test_planner.py         # Planner tests
+│   │   └── test_guardrails.py      # Guardrails tests
+│   └── requirements.txt
+├── web/                            # React frontend (Vite + TypeScript)
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── chat/               # ChatMessage, ChatInput, QuickPrompts
+│   │   │   ├── layout/             # Sidebar
+│   │   │   └── landing/            # Nav, Hero, TrustBar, FAQ, Footer
+│   │   ├── hooks/useChat.ts        # SSE streaming hook
+│   │   ├── store/chatStore.ts      # Zustand state management
+│   │   ├── pages/LandingPage.tsx   # Landing page
+│   │   ├── App.tsx                 # Hash-based routing
+│   │   └── index.css               # Tailwind theme
+│   ├── package.json
+│   └── vite.config.ts
 ├── docs/
-│   ├── architecture.md       # System design
-│   ├── skills/               # Agent skills
-│   └── noisy_data/           # Adversarial test fixtures
-├── ui/
-│   ├── app.py                # Streamlit chat interface
-│   └── landing.html          # Landing page
-└── requirements.txt
+│   ├── architecture.md             # System design
+│   ├── plan.md                     # Project roadmap
+│   └── skills/                     # Agent skills
+├── .env                            # Environment variables (gitignored)
+└── README.md
 ```
 
 ---
@@ -227,10 +256,10 @@ compliso/
 
 ## Data & Eval
 
-### `data/true_data/` — verified ground truth
+### `api/data/true_data/` — verified ground truth
 Structured, source-dated, cross-checked regulatory documents covering MSME classification, GST registration, rate slabs, return filing, composition scheme, and delayed-payment protection.
 
-### `data/noisy_data/` — adversarial eval fixtures
+### `api/data/noisy_data/` — adversarial eval fixtures
 Realistic low-quality content: outdated blogs, forum threads, promotional pages, contradictory sources, OCR-garbled circulars, unconfirmed speculation. Indexed alongside `true_data/` to stress-test retrieval prioritization.
 
 ---

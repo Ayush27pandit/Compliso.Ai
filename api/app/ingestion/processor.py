@@ -541,10 +541,12 @@ def ensure_collection(
     ):
         qdrant_client.create_collection(
             collection_name=collection_name,
-            vectors_config=models.VectorParams(
-                size=dimension,
-                distance=models.Distance.COSINE,
-            ),
+            vectors_config={
+                "dense": models.VectorParams(
+                    size=dimension,
+                    distance=models.Distance.COSINE,
+                ),
+            },
             sparse_vectors_config={
                 "bm25": models.SparseVectorParams(
                     modifier=models.Modifier.IDF,

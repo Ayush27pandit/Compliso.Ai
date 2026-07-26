@@ -56,6 +56,7 @@ def _dense_search(query: str, limit: int = 8):
         response = client.query_points(
             collection_name=settings.QDRANT_COLLECTION,
             query=query_vector,
+            using="dense",
             limit=limit,
             with_payload=True,
         )

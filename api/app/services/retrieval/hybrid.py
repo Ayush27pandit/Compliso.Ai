@@ -88,6 +88,7 @@ class HybridSearcher:
             dense_response = self.client.query_points(
                 collection_name=settings.QDRANT_COLLECTION,
                 query=dense_vector,
+                using="dense",
                 limit=limit,
                 with_payload=True,
             )
@@ -127,6 +128,7 @@ class HybridSearcher:
                 sparse_response = self.client.query_points(
                     collection_name=settings.QDRANT_COLLECTION,
                     query=sparse_vector,
+                    using="bm25",
                     limit=limit,
                     with_payload=True,
                 )

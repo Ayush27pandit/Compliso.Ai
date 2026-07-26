@@ -34,3 +34,6 @@ web/dist/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Agent context (AI-only, not for git)
+.agent-context/

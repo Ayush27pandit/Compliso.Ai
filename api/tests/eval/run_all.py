@@ -30,9 +30,9 @@ from tests.eval.regression import run_regression
 
 
 def get_agent():
-    from app.agents.graph import build_graph
+    from app.agents.graph import rag_agent
 
-    return build_graph()
+    return rag_agent
 
 
 def run_all(args):

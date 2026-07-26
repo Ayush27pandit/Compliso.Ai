@@ -26,9 +26,9 @@ from tests.eval.metrics import EvalResult, print_result, score_answer, summary
 
 def get_agent():
     """Lazy-load the compiled agent."""
-    from app.agents.graph import build_graph
+    from app.agents.graph import rag_agent
 
-    return build_graph()
+    return rag_agent
 
 
 def run_adversarial(fixture: dict, agent=None, verbose: bool = False) -> EvalResult:
@@ -47,8 +47,10 @@ def run_adversarial(fixture: dict, agent=None, verbose: bool = False) -> EvalRes
         "final_answer": "",
     }
 
+    config = {"configurable": {"thread_id": f"eval-{fixture['id']}"}}
+
     try:
-        result = agent.invoke(state)
+        result = agent.invoke(state, config=config)
         answer = result.get("final_answer", "")
     except Exception as e:
         answer = f"ERROR: {e}"

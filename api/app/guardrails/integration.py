@@ -5,7 +5,7 @@ Wraps the existing LangGraph agent with guardrails checks.
 
 from typing import Dict, Any, List, Optional
 from app.agents.state import AgentState
-from guardrails.actions.custom_actions import GuardrailsManager, guardrails_manager
+from app.guardrails.actions.custom_actions import GuardrailsManager, guardrails_manager
 import logfire
 
 

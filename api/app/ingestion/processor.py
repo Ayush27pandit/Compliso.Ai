@@ -19,6 +19,7 @@ from app.services.retrieval.embeddings import (
     embed_texts,
     get_embedding_dim,
 )
+from app.services.retrieval.sparse import BM25Encoder
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -351,6 +352,18 @@ def process_file(
                     f"{len(embeddings)} embeddings"
                 )
 
+            # ── 5b. Generate BM25 sparse vectors ──────────────
+
+            bm25 = BM25Encoder()
+            bm25.fit(chunks)
+            sparse_vectors = bm25.encode_batch(chunks)
+
+            logfire.info(
+                "BM25 sparse vectors generated",
+                filename=filename,
+                vocab_size=len(bm25.vocab),
+            )
+
             # ── 6. Create deterministic Qdrant points ─────────────
 
             points: list[models.PointStruct] = []
@@ -358,8 +371,9 @@ def process_file(
             for chunk_index, (
                 chunk,
                 vector,
+                sparse_vec,
             ) in enumerate(
-                zip(chunks, embeddings)
+                zip(chunks, embeddings, sparse_vectors)
             ):
                 point_id = generate_point_id(
                     document_id=document_id,
@@ -367,9 +381,19 @@ def process_file(
                     chunk=chunk,
                 )
 
+                # Convert sparse dict {dim: weight} to Qdrant SparseVector format
+                sparse_indices = list(sparse_vec.keys())
+                sparse_values = list(sparse_vec.values())
+
                 point = models.PointStruct(
                     id=point_id,
-                    vector=vector,
+                    vector={
+                        "dense": vector,
+                        "bm25": models.SparseVector(
+                            indices=sparse_indices,
+                            values=sparse_values,
+                        ),
+                    },
                     payload={
                         "text": chunk,
                         "document_id": document_id,
@@ -478,7 +502,7 @@ def ensure_collection(
     wipe: bool = False,
 ) -> None:
     """
-    Ensure the Qdrant collection exists with the correct vector size.
+    Ensure the Qdrant collection exists with dense + sparse vector configs.
 
     If wipe=True, delete the existing collection first.
     """
@@ -511,7 +535,7 @@ def ensure_collection(
     dimension = get_embedding_dim()
 
     with logfire.span(
-        "🗄️ Creating Qdrant Collection",
+        "🗄️ Creating Qdrant Collection (dense + sparse)",
         collection=collection_name,
         vector_dimension=dimension,
     ):
@@ -521,13 +545,19 @@ def ensure_collection(
                 size=dimension,
                 distance=models.Distance.COSINE,
             ),
+            sparse_vectors_config={
+                "bm25": models.SparseVectorParams(
+                    modifier=models.Modifier.IDF,
+                ),
+            },
         )
 
     logfire.info(
-        "Qdrant collection created",
+        "Qdrant collection created (dense + sparse)",
         collection=collection_name,
         vector_dimension=dimension,
         distance="cosine",
+        sparse="bm25 with IDF",
     )
 
 

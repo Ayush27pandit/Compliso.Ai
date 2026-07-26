@@ -3,7 +3,7 @@ Tests for guardrails system.
 """
 
 import pytest
-from guardrails.actions.custom_actions import (
+from app.guardrails.actions.custom_actions import (
     InputGuardrails,
     OutputGuardrails,
     RetrievalGuardrails,

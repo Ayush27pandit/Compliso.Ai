@@ -1,6 +1,7 @@
 import time
 import logfire
 from flashrank import Ranker, RerankRequest
+from app.services.retrieval.authority import authority_rerank, detect_contradictions
 
 # Lazy initialization - Ranker is loaded on first use to ensure logfire.configure() has run
 _ranker = None
@@ -25,12 +26,13 @@ def _get_ranker() -> Ranker:
 
 def rerank_documents(query: str, documents: list[str], top_n: int = 5) -> list[str]:
     """
-    Refines retrieval results by re-scoring documents against the query semantically.
+    Refines retrieval results using semantic reranking + authority scoring.
     
-    Why FlashRank? 
-    Standard vector search (Cosine Similarity) is fast but mathematically "fuzzy."
-    FlashRank uses a Cross-Encoder approach which is much more precise but usually slow.
-    FlashRank solves this by using highly optimized, quantized ONNX models locally.
+    Flow:
+        1. FlashRank semantic reranking (relevance)
+        2. Authority scoring (source trustworthiness)
+        3. Contradiction detection
+        4. Combined ranking
     """
     if not documents:
         return []
@@ -50,18 +52,53 @@ def rerank_documents(query: str, documents: list[str], top_n: int = 5) -> list[s
         request = RerankRequest(query=query, passages=passages)
         results = ranker.rerank(request)
         
-        # Results are returned sorted by highest semantic score first
-        reranked_docs = []
-        for res in results[:top_n]:
-            reranked_docs.append(res['text'])
+        # Build result list with scores
+        reranked = []
+        for res in results[:top_n * 2]:  # Get more candidates for authority reranking
+            idx = res['id']
+            # Extract source from tagged content (format: "[Source: filename]\ncontent")
+            content = res['text']
+            source = "unknown"
+            if content.startswith("[Source: "):
+                end = content.index("]")
+                source = content[9:end]
+                content = content[end + 2:]
+
+            reranked.append({
+                "content": content,
+                "source": source,
+                "score": res['score'],
+                "tagged_content": res['text'],  # Keep original for LLM
+            })
 
         duration = time.time() - start_time
         top_score = results[0]['score'] if results else 'N/A'
-        logfire.info(f"✅ [Reranker] Done in {duration:.2f}s. Top semantic score: {top_score}")
-        
-        return reranked_docs
+        logfire.info(f"✅ [Reranker] Semantic reranking done in {duration:.2f}s. Top score: {top_score}")
+
+        # Apply authority scoring
+        reranked = authority_rerank(
+            reranked,
+            authority_weight=0.25,
+            relevance_weight=0.75,
+        )
+
+        # Detect contradictions
+        reranked = detect_contradictions(reranked)
+
+        # Return top_n results (already sorted by combined_score)
+        final = reranked[:top_n]
+
+        logfire.info(
+            "✅ [Reranker] Final ranking applied",
+            total=len(final),
+            sources=[r.get("source", "?") for r in final[:3]],
+            scores=[f"{r.get('combined_score', 0):.3f}" for r in final[:3]],
+        )
+
+        # Return tagged content for LLM context
+        return [r.get("tagged_content", r["content"]) for r in final]
 
     except Exception as e:
-        logfire.error(f"❌ [Reranker] Semantic Reranking Failed: {e}")
-        # Fallback to the original Qdrant order to ensure the user still gets an answer
+        logfire.error(f"❌ [Reranker] Reranking Failed: {e}")
+        # Fallback to the original order
         return documents[:top_n]

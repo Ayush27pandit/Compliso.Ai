@@ -17,6 +17,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Delay between tests to avoid Groq TPD rate limit (free tier: 100k tokens/day)
+_TEST_DELAY = 2.0
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from dotenv import load_dotenv
@@ -56,6 +59,7 @@ def run_all(args):
             result.notes += f" ({elapsed:.1f}s)"
             all_results.append(("regression", result))
             print(print_result(result, verbose=args.verbose))
+            time.sleep(_TEST_DELAY)
 
     # ── Adversarial ───────────────────────────────────────
     if not args.regression_only:
@@ -68,6 +72,7 @@ def run_all(args):
             result.notes += f" ({elapsed:.1f}s)"
             all_results.append(("adversarial", result))
             print(print_result(result, verbose=args.verbose))
+            time.sleep(_TEST_DELAY)
 
     # ── Summary ───────────────────────────────────────────
     reg_results = [r for t, r in all_results if t == "regression"]

@@ -69,8 +69,8 @@ def _is_historical_context(answer_lower: str, keyword_lower: str) -> bool:
         if pos == -1:
             return False
 
-        # Look at the 60 characters before the keyword
-        start = max(0, pos - 60)
+        # Look at the 100 characters before the keyword
+        start = max(0, pos - 100)
         preceding = answer_lower[start:pos]
 
         if _HISTORICAL_CONTEXT.search(preceding):

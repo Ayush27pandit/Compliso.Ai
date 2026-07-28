@@ -6,7 +6,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.config import settings
 
 
-BATCH_SIZE = 50
+BATCH_SIZE = 25
 _GEMINI_DIM = 3072
 _FALLBACK_DIM = 768  # all-mpnet-base-v2
 
@@ -124,7 +124,7 @@ def _embed_batch(batch: list[str]) -> list[list[float]]:
         raise RuntimeError("Embedding model is not initialized")
 
     if _model_type == "gemini":
-        for attempt in range(4):
+        for attempt in range(6):
             try:
                 return _active_model.embed_documents(batch)
 
@@ -141,7 +141,7 @@ def _embed_batch(batch: list[str]) -> list[list[float]]:
                     )
                 )
 
-                is_last_attempt = attempt == 3
+                is_last_attempt = attempt == 5
 
                 if not is_rate_limit or is_last_attempt:
                     logfire.exception(
@@ -151,12 +151,11 @@ def _embed_batch(batch: list[str]) -> list[list[float]]:
                     )
                     raise
 
-                wait_seconds = 2 ** attempt
+                wait_seconds = [30, 60, 60, 60, 60][attempt]
 
                 logfire.warning(
                     "Gemini rate limit hit; retrying",
                     attempt=attempt + 1,
-                    max_attempts=4,
                     wait_seconds=wait_seconds,
                 )
 
@@ -233,5 +232,8 @@ def embed_texts(
             ):
                 embeddings = _embed_batch(batch)
                 all_embeddings.extend(embeddings)
+
+            if _model_type == "gemini":
+                time.sleep(1.5)
 
     return all_embeddings
